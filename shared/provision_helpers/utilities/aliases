@@ -1,0 +1,35 @@
+function vdf() {
+    vagrant destroy -f $@
+}
+
+function vup() {
+    vagrant up $@
+}
+
+function systat() {
+    sudo systemctl status $@
+}
+function systart() {
+    sudo systemctl start $@
+}
+function syrestart() {
+    sudo systemctl restart $@
+}
+function systop() {
+    sudo systemctl stop $@
+}
+function jcu() {
+    sudo journalctl -u $@
+}
+
+function kc() {
+    kubectl $@
+}
+
+function kcall() {
+    kubectl $@ --all-namespaces
+}
+
+function kcsys() {
+    kubectl $@ --namespace=kube-system
+}
