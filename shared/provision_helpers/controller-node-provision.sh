@@ -3,15 +3,27 @@
 source /home/vagrant/shared/provision_helpers/shared_vars.sh
 source /home/vagrant/shared/provision_helpers/controller_vars.sh
 
+echo " ************ Binary Versions ************ "
+etcd --version
+etcdctl --version
+kubectl version
+echo "API Server"
+kube-apiserver --version
+echo "Controller manager"
+kube-controller-manager --version
+echo "Scheduler"
+kube-scheduler --version
+
 HOSTFROMFILE=controller-1
-EXTERNAL_IP=10.200.10.10
-INTERNAL_IP=10.200.0.10
+EXTERNAL_IP=192.168.10.10
+INTERNAL_IP=192.168.0.10
 
 echo "Provisioning Node $HOSTFROMFILE with \
 ExternalIP: $EXTERNAL_IP and \
 InternalIP: $INTERNAL_IP"
 
 # configure /etc/hosts
+echo " ************ /etc/hosts CONFIG ************ "
 WORKER_HOSTNAME_IP=$(grep worker $CLUSTER_IPS)
 for ip in $WORKER_HOSTNAME_IP
 do
@@ -25,70 +37,6 @@ do
     host_ip_pair=$(echo $ip | sed 's/,/ /g')
     echo $host_ip_pair | sudo tee -a /etc/hosts > /dev/null
 done
-
-# ------------------------------- UTILITIES -------------------------------
-sudo swapoff -a > /dev/null
-sudo iptables -P FORWARD ACCEPT
-sudo apt-get remove docker docker-engine docker.io > /dev/null
-sudo apt-get install -y docker.io > /dev/null
-
-echo " ************ Verifying Docker ************ "
-sudo docker run hello-world
-# ------------------------------- UTILITIES -------------------------------
-
-# ------------------------------- KUBECTL -------------------------------
-# Install kubectl
-if [ ! -d "/home/vagrant/shared/bin/kubectl" ]; then
-    {
-        mkdir -p /home/vagrant/shared/bin/kubectl
-        cd /home/vagrant/shared/bin/kubectl
-
-        echo " ************ Downloading kubectl binary ************ "
-        wget -q https://storage.googleapis.com/kubernetes-release/release/v1.12.0/bin/linux/amd64/kubectl > /dev/null
-
-        chmod +x kubectl
-        sudo cp kubectl /usr/local/bin/
-        cd -
-    }
-else
-    {
-        cd /home/vagrant/shared/bin/kubectl
-
-        echo " ************ Copying kubectl from shared bin folder ************ "
-        sudo cp kubectl /usr/local/bin/
-
-        cd -
-    }
-fi
-# ------------------------------- KUBECTL -------------------------------
-
-# ------------------------------- PKI INFRA START -------------------------------
-# Tools to provision PKI infrastructure and generate TLS certificates
-if [ ! -d "/home/vagrant/shared/bin/pki" ]; then
-    {
-        mkdir -p /home/vagrant/shared/bin/pki
-        cd /home/vagrant/shared/bin/pki
-
-        echo " ************ Downloading PKI tools ************ "
-        wget https://pkg.cfssl.org/R1.2/cfssl_linux-amd64 \
-            https://pkg.cfssl.org/R1.2/cfssljson_linux-amd64 > /dev/null
-
-        chmod +x cfssl_linux-amd64 cfssljson_linux-amd64
-        sudo cp cfssl_linux-amd64 /usr/local/bin/cfssl
-        sudo cp cfssljson_linux-amd64 /usr/local/bin/cfssljson
-        cd -
-    }
-else
-    {
-        cd /home/vagrant/shared/bin/pki
-
-        echo " ************ Copying PKI tools from shared bin folder ************ "
-        sudo cp cfssl_linux-amd64 /usr/local/bin/cfssl
-        sudo cp cfssljson_linux-amd64 /usr/local/bin/cfssljson
-
-        cd -
-    }
-fi
 
 echo " ************ Creating PKI directories ************ "
 mkdir -p $CA_PATH
@@ -383,10 +331,7 @@ else
     echo "----> No work to do for $SERVICE_ACCOUNT_CSR certificates"
 fi
 
-# ------------------------------- PKI INFRA END -------------------------------
-
 # ------------------------------- KUBE CONFIG FILES START -------------------------------
-
 echo "BUILDING admin.kubeconfig"
 kubectl config set-cluster ${NETWORK_NAME} \
     --certificate-authority=${CA_PATH}/ca.pem \
@@ -474,53 +419,6 @@ kubectl config set-context ${KUBE_CFG_CONTEXT} \
 kubectl config use-context ${KUBE_CFG_CONTEXT} \
     --kubeconfig=${SCHEDULER_KUBE_CONFIG_PATH}/kube-scheduler.kubeconfig > /dev/null
 
-# ------------------------------- KUBE CONFIG FILES STOP -------------------------------
-
-# ------------------------------- ENCRYPT CONFIG FILES START -------------------------------
-
-cat > ${ENCRYPTION_FILE} <<EOF
-kind: EncryptionConfig
-apiVersion: v1
-resources:
-  - resources:
-      - secrets
-    providers:
-      - aescbc:
-          keys:
-            - name: key1
-              secret: ${ENCRYPTION_KEY}
-      - identity: {}
-EOF
-
-# ------------------------------- ENCRYPT CONFIG FILES STOP -------------------------------
-
-#sudo apt-get -y install systemd
-
-# ------------------------------- ETCD CONFIG START -------------------------------
-
-if [ ! -d "/home/vagrant/shared/bin/etcd" ]; then
-    {
-        mkdir -p /home/vagrant/shared/bin/etcd
-        cd /home/vagrant/shared/bin/etcd
-
-        echo " ************ Downloading etcd binary ************ "
-        wget -q --https-only --timestamping \
-            https://github.com/coreos/etcd/releases/download/v3.3.9/etcd-v3.3.9-linux-amd64.tar.gz > /dev/null
-
-        tar -xvf etcd-v3.3.9-linux-amd64.tar.gz
-        sudo cp etcd-v3.3.9-linux-amd64/etcd* /usr/local/bin/
-        cd -
-    }
-else
-    {
-        cd /home/vagrant/shared/bin/etcd
-
-        echo " ************ Copying etcd binary from shared bin ************ "
-        sudo cp etcd-v3.3.9-linux-amd64/etcd* /usr/local/bin/
-
-        cd -
-    }
-fi
 
 sudo mkdir -p /etc/etcd /var/lib/etcd
 sudo cp $CA_PATH/ca.pem  \
@@ -574,41 +472,11 @@ sudo ETCDCTL_API=3 etcdctl member list \
   --cert=/etc/etcd/kubernetes.pem \
   --key=/etc/etcd/kubernetes-key.pem
 
-# ------------------------------- ETCD CONFIG STOP -------------------------------
-
-
-# ------------------------------- CONTROL PLANE CONFIG START -------------------------------
-
-sudo mkdir -p /etc/kubernetes/config
-if [ ! -d "/home/vagrant/shared/bin/controller" ]; then
-    {
-        sudo mkdir -p /home/vagrant/shared/bin/controller
-        cd /home/vagrant/shared/bin/controller
-
-        echo " ************ Download kubernetes controller binaries ************ "
-        wget -q --https-only --timestamping \
-            https://dl.k8s.io/v1.14.0-rc.1/kubernetes-server-linux-amd64.tar.gz > /dev/null
-
-        tar -xvzf kubernetes-server-linux-amd64.tar.gz
-        cp kubernetes/server/bin/* ./
-        chmod +x kube-apiserver kube-controller-manager kube-scheduler
-        sudo cp kube-apiserver kube-controller-manager kube-scheduler /usr/local/bin/
-        cd -
-    }
-else
-    {
-        cd /home/vagrant/shared/bin/controller
-        echo " ************ Copying kubernetes controller binaries from shared bin ************ "
-        sudo cp kube-apiserver kube-controller-manager kube-scheduler /usr/local/bin/
-        cd -
-    }
-fi
-
 sudo mkdir -p /var/lib/kubernetes/
 sudo cp $CA_PATH/ca.pem $CA_PATH/ca-key.pem \
     $API_SERVER_PATH/kubernetes-key.pem $API_SERVER_PATH/kubernetes.pem \
         $SERVICE_ACCOUNT_PATH/service-account-key.pem $SERVICE_ACCOUNT_PATH/service-account.pem \
-        encryption-config.yaml /var/lib/kubernetes/
+        /var/lib/kubernetes/
 
 
 echo " ************ Create kube-apiserver systemd unit file ************ "
@@ -721,63 +589,15 @@ EOF
     sudo systemctl start kube-apiserver kube-controller-manager kube-scheduler
 }
 
-# Allow up to 5 seconds for the Kubernetes API Server to fully initialize.
-echo " ************ Allow 5 seconds for Kubernetes API server to initialize ************ "
-sleep 5
-
-# A Google Network Load Balancer will be used to distribute traffic across the three API servers
-# and allow each API server to terminate TLS connections and validate client certificates.
-# The network load balancer only supports HTTP health checks which means the HTTPS
-# endpoint exposed by the API server cannot be used. As a workaround the nginx webserver
-# can be used to proxy HTTP health checks. In this section nginx will be installed and
-# configured to accept HTTP health checks on port 80 and proxy the connections to
-# the API server on https://127.0.0.1:6443/healthz.
-
-# The /healthz API server endpoint does not require authentication by default.
-
-#echo "Removing outdated nginx binary and installing newer stable version"
-#sudo apt-get remove nginx nginx-common
-#sudo apt-get autoremove
-#
-#echo "Install nginx"
-#sudo add-apt-repository ppa:nginx/stable
-#sudo apt-get install -y nginx
-
-#echo "Creating nginx config"
-#cat > kubernetes.default.svc.cluster.local <<EOF
-#server {
-#  listen      80;
-#  server_name kubernetes.default.svc.cluster.local;
-#
-#  location /healthz {
-#     proxy_pass                    https://${EXTERNAL_IP}:6443/healthz;
-#     proxy_ssl_trusted_certificate /var/lib/kubernetes/ca.pem;
-# }
-#}
-#EOF
-#
-#echo "Starting nginx"
-#sudo apt-get install -y nginx
-#
-#echo "Move nginx kubernetes config to /etc/nginx/sites-available"
-#sudo cp kubernetes.default.svc.cluster.local \
-#  /etc/nginx/sites-available/kubernetes.default.svc.cluster.local
-#sudo ln -s /etc/nginx/sites-available/kubernetes.default.svc.cluster.local /etc/nginx/sites-enabled/
-#
-#sudo systemctl start nginx
-#sleep 2
-#sudo systemctl reload nginx
+# Allow up to 10 seconds for the Kubernetes API Server to fully initialize.
+echo " ************ Allow 10 seconds for Kubernetes API server to initialize ************ "
+sleep 10
 
 echo " ************ Check kubernetes component status ************ "
 kubectl get componentstatuses --kubeconfig ${ADMIN_KUBE_CONFIG_PATH}/admin.kubeconfig
 
-#echo "Check nginx health check proxy over HTTP"
-#curl -H "Host: kubernetes.default.svc.cluster.local" -i http://${EXTERNAL_IP}/healthz
-
 echo " ************ Check kube-apiserver version over HTTPS ************ "
 curl --cacert $CA_PATH/ca.pem https://${EXTERNAL_IP}:6443/version
-
-# ------------------------------- CONTROL PLANE CONFIG STOP -------------------------------
 
 # ------------------------------- UTILITIES -------------------------------
 if [ ! -d "/home/vagrant/shared/bin/utilities" ]; then
@@ -802,8 +622,6 @@ else
     }
 fi
 sudo skaffold config set default-repo bekerr1
-# ------------------------------- UTILITIES -------------------------------
-# ------------------------------- UTILITIES -------------------------------
 
 # experimental. This seems to be needed...
 sudo iptables -P FORWARD ACCEPT

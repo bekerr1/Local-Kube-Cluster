@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: echo-server
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      run: echo-serve-me
+  replicas: 2
+  template:
+    metadata:
+      labels:
+        run: echo-serve-me
+    spec:
+      containers:
+      - image: k8s.gcr.io/echoserver
+        name: echo-me
+        ports:
+        - containerPort: 80
+
